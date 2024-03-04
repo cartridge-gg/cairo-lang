@@ -11,7 +11,7 @@ func select_input_builtins(
     n_selected_builtins,
 ) {
     // Number of memory cells used, without taking the inner function memory into account.
-    const FUNC_MEMORY_WITHOUT_INNER_FUNC = 11;
+    const FUNC_MEMORY_WITHOUT_INNER_FUNC = 9;
     const INNER_FUNC_MEMORY_PER_ITERATION = inner_select_builtins.FUNC_MEMORY_WITH_BUILTINS;
     const INNER_FUNC_MEMORY_FINAL_ITERATION = inner_select_builtins.FUNC_MEMORY_NO_BUILTINS;
     // 'inner_select_builtins' has n_all_builtins iterations, until the final halting one, when

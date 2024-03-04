@@ -8,7 +8,7 @@ from starkware.cairo.stark_verifier.core.channel import (
     channel_new,
     random_felts_to_prover,
     random_uint256_to_prover,
-    read_felt_from_prover,
+    read_truncated_hash_from_prover,
     read_felt_vector_from_prover,
     read_felts_from_prover,
 )
@@ -43,7 +43,7 @@ func test_from{
     local original_channel: Channel = channel;
     with channel {
         let (unsent_values: ChannelUnsentFelt*) = alloc();
-        let (value) = read_felt_from_prover(ChannelUnsentFelt(2 ** 160 - 1));
+        let (value) = read_truncated_hash_from_prover(ChannelUnsentFelt(2 ** 160 - 1));
         assert value = ChannelSentFelt(2 ** 160 - 1);
         assert channel.digest = Uint256(
             56167004286255481276482511662906702549, 234392798194350380932282913623756516436

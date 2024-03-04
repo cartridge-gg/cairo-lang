@@ -86,11 +86,10 @@ func random_felts_to_prover{
     }
 }
 
-// This in an inner function, it should not be used. Use read_felt_from_prover or
-// read_montgomery_form_felt_from_prover instead.
-func read_felt_from_prover_inner{
-    range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
-}(value: felt) -> () {
+// Reads a truncated hash from the prover. See Channel.
+func read_truncated_hash_from_prover{
+     range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
+}(value: ChannelUnsentFelt) -> (value: ChannelSentFelt) {
     alloc_locals;
     let (data: felt*) = alloc();
     let data_start = data;
@@ -99,25 +98,29 @@ func read_felt_from_prover_inner{
         Uint256(low=channel.digest.low + 1, high=channel.digest.high)
     );
 
-    blake2s_add_felt{data=data}(num=value, bigend=1);
+    // value encodes the 160 least significant bits of a 256-bit hash.
+    let (high, low) = split_felt(value.value);
+    blake2s_add_uint256_bigend{data=data}(Uint256(low=low, high=high));
     let (digest) = blake2s_bigend(data=data_start, n_bytes=64);
     let channel = Channel(digest=digest, counter=0);
-    return ();
+    return (value=ChannelSentFelt(value.value));
 }
 
 // Reads a field element from the prover. See Channel.
 func read_felt_from_prover{
     range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
 }(value: ChannelUnsentFelt) -> (value: ChannelSentFelt) {
-    read_felt_from_prover_inner(value=value.value);
-    return (value=ChannelSentFelt(value.value));
-}
-
-// Reads a montgomery form represented field element from the prover. See Channel.
-func read_montgomery_form_felt_from_prover{
-    range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
-}(value: ChannelUnsentFelt) -> (value: ChannelSentFelt) {
-    read_felt_from_prover_inner(value=value.value * MONTGOMERY_R);
+    alloc_locals;
+    let (data: felt*) = alloc();
+    let data_start = data;
+    assert_not_equal(channel.digest.low, 2 ** 128 - 1);
+    blake2s_add_uint256_bigend{data=data}(
+        Uint256(low=channel.digest.low + 1, high=channel.digest.high)
+    );
+    // The prover uses Montgomery form to generate randomness.
+    blake2s_add_felt{data=data}(num=value.value * MONTGOMERY_R, bigend=1);
+    let (digest) = blake2s_bigend(data=data_start, n_bytes=64);
+    let channel = Channel(digest=digest, counter=0);
     return (value=ChannelSentFelt(value.value));
 }
 
@@ -140,19 +143,23 @@ func read_uint64_from_prover{
     return (value=ChannelSentFelt(value.value));
 }
 
-// Reads multiple field elements from the prover.
-// Calls read_felt_from_prover on the hash chain of values. See Channel.
+// Reads multiple field elements from the prover. Repeats read_felt_from_prover. See Channel.
 func read_felts_from_prover{
-    range_check_ptr,
-    pedersen_ptr: HashBuiltin*,
-    blake2s_ptr: felt*,
-    bitwise_ptr: BitwiseBuiltin*,
-    channel: Channel,
+    range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
 }(n_values: felt, values: ChannelUnsentFelt*) -> (values: ChannelSentFelt*) {
-    alloc_locals;
-    let (unsent_felt_hash: felt) = hash_felts{hash_ptr=pedersen_ptr}(data=values, length=n_values);
-    read_felt_from_prover(ChannelUnsentFelt(unsent_felt_hash));
+    read_felts_from_prover_inner(n_values=n_values, values=values);
     return (values=cast(values, ChannelSentFelt*));
+}
+
+func read_felts_from_prover_inner{
+    range_check_ptr, blake2s_ptr: felt*, bitwise_ptr: BitwiseBuiltin*, channel: Channel
+}(n_values: felt, values: ChannelUnsentFelt*) -> () {
+    if (n_values == 0) {
+        return ();
+    }
+
+    let (value) = read_felt_from_prover(values[0]);
+    return read_felts_from_prover_inner(n_values=n_values - 1, values=&values[1]);
 }
 
 // Reads a field element vector from the prover. Unlike read_felts_from_prover, this hashes all the
