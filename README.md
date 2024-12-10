@@ -58,3 +58,7 @@ Once the docker image is built, you can fetch the python package zip file using:
 > docker rm -v ${container_id}
 ```
 
+
+python src/starkware/cairo/lang/scripts/cairo-compile     --cairo_path=src     src/starkware/cairo/cairo_verifier/layouts/all_cairo/cairo_verifier.cairo     --output cairo_verifier.json     --no_debug_info     --proof_mode
+
+python src/starkware/cairo/lang/scripts/cairo-run    --program=cairo_verifier.json     --layout=recursive_with_poseidon     --program_input=proof.json     --print_output     --print_info --proof_mode
