@@ -55,14 +55,8 @@ ALL_BUILTINS = BuiltinList(
         OUTPUT_BUILTIN,
         PEDERSEN_BUILTIN,
         RANGE_CHECK_BUILTIN,
-        ECDSA_BUILTIN,
         BITWISE_BUILTIN,
-        EC_OP_BUILTIN,
-        KECCAK_BUILTIN,
         POSEIDON_BUILTIN,
-        RANGE_CHECK96_BUILTIN,
-        ADD_MOD_BUILTIN,
-        MUL_MOD_BUILTIN,
     ]
 )
 # The list of builtins which may have ratio < 1 (and implement BuiltinInstanceDefWithLowRatio).

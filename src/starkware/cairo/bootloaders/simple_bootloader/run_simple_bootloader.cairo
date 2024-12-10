@@ -14,14 +14,8 @@ func run_simple_bootloader{
     output_ptr: felt*,
     pedersen_ptr: HashBuiltin*,
     range_check_ptr,
-    ecdsa_ptr,
     bitwise_ptr,
-    ec_op_ptr,
-    keccak_ptr,
     poseidon_ptr: PoseidonBuiltin*,
-    range_check96_ptr,
-    add_mod_ptr,
-    mul_mod_ptr,
 }() {
     alloc_locals;
     local task_range_check_ptr;
@@ -47,14 +41,8 @@ func run_simple_bootloader{
         output=cast(output_ptr, felt),
         pedersen=cast(pedersen_ptr, felt),
         range_check=task_range_check_ptr,
-        ecdsa=ecdsa_ptr,
         bitwise=bitwise_ptr,
-        ec_op=ec_op_ptr,
-        keccak=keccak_ptr,
         poseidon=cast(poseidon_ptr, felt),
-        range_check96=range_check96_ptr,
-        add_mod=add_mod_ptr,
-        mul_mod=mul_mod_ptr,
     );
 
     // A struct containing the encoding of each builtin.
@@ -62,28 +50,16 @@ func run_simple_bootloader{
         output='output',
         pedersen='pedersen',
         range_check='range_check',
-        ecdsa='ecdsa',
         bitwise='bitwise',
-        ec_op='ec_op',
-        keccak='keccak',
         poseidon='poseidon',
-        range_check96='range_check96',
-        add_mod='add_mod',
-        mul_mod='mul_mod',
     );
 
     local builtin_instance_sizes: BuiltinData = BuiltinData(
         output=1,
         pedersen=3,
         range_check=1,
-        ecdsa=2,
         bitwise=5,
-        ec_op=7,
-        keccak=16,
         poseidon=6,
-        range_check96=1,
-        add_mod=7,
-        mul_mod=7,
     );
 
     // Call execute_tasks.
@@ -108,14 +84,8 @@ func run_simple_bootloader{
     let output_ptr = cast(builtin_ptrs.output, felt*);
     let pedersen_ptr = cast(builtin_ptrs.pedersen, HashBuiltin*);
     let range_check_ptr = builtin_ptrs.range_check;
-    let ecdsa_ptr = builtin_ptrs.ecdsa;
     let bitwise_ptr = builtin_ptrs.bitwise;
-    let ec_op_ptr = builtin_ptrs.ec_op;
-    let keccak_ptr = builtin_ptrs.keccak;
     let poseidon_ptr = cast(builtin_ptrs.poseidon, PoseidonBuiltin*);
-    let range_check96_ptr = builtin_ptrs.range_check96;
-    let add_mod_ptr = builtin_ptrs.add_mod;
-    let mul_mod_ptr = builtin_ptrs.mul_mod;
 
     // 'execute_tasks' runs untrusted code and uses the range_check builtin to verify that
     // the builtin pointers were advanced correctly by said code.
