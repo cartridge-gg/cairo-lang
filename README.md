@@ -1,3 +1,54 @@
+# Prerequisite
+Make sure you have proper python version `Python 3.9.18`
+#### 1. Create python virtual enviroment
+`python -m venv venv`
+#### 2. Install requiered libs
+`pip install -r scripts/requirements.txt`
+
+# Bootloader
+#### 0. Bootloader input 
+For now i dont know how to pass the program so we will use PIE   
+To generate PIE clone cairo-vm repo:
+- `git clone https://github.com/chudkowsky/cairo-vm.git`  
+- checkout to this branch (it removes input from output segment which is crucial for zk principals)
+- `git checkout output-segment-fix`
+- go into cairo1-run directory
+- `cd cairo1-run`
+- run cairo1-run mandatorily use flag `--append_return_values` and `--cairo_pie_output`, example command: 
+- `cargo run <path to compiled program>  --cairo_pie_output <path to pie> --layout starknet --args '[1 2]' --append_return_values` 
+### Example input 
+```
+{
+  "tasks": [
+    {
+      "type": "CairoPiePath",
+      "path": "pie.zip", //set this to absolute path of your pie.
+      "use_poseidon": true
+    }
+  ],
+  "single_page": true
+}
+```
+#### 1. Compiling the bootloader
+```
+python src/starkware/cairo/lang/scripts/cairo-compile src/starkware/cairo/bootloaders/simple_bootloader/simple_bootloader.cairo --output bootloader.json --proof_mode
+```
+
+#### 2. Running bootloader in proof mode 
+```
+python src/starkware/cairo/lang/scripts/cairo-run --program=bootloader.json --layout=starknet --program_input=bootloader_input.json --print_output --print_info --proof_mode
+```
+
+## Example Bootloader output 
+```
+Program output:
+  1 // number of tasks
+  4 // child program output length + 2 
+  -1381020127275946517821771337425383620463662836478788688134738122902862081625 // child program hash
+  160268921359133235574810995023520895391777547407923205700393332203861498631 //child program output
+  -1185520529951709694358997861233403364340253217643441315233473441195110832181 //child program output 
+```
+
 # Introduction
 
 [Cairo](https://cairo-lang.org/) is a programming language for writing provable programs.
