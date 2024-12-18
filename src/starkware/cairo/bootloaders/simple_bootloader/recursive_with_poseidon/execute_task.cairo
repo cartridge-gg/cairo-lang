@@ -28,14 +28,8 @@ struct BuiltinData {
     output: felt,
     pedersen: felt,
     range_check: felt,
-    ecdsa: felt,
     bitwise: felt,
-    ec_op: felt,
-    keccak: felt,
     poseidon: felt,
-    range_check96: felt,
-    add_mod: felt,
-    mul_mod: felt,
 }
 
 // Computes the hash of a program.
@@ -89,7 +83,7 @@ func execute_task{builtin_ptrs: BuiltinData*, self_range_check_ptr}(
         program_address, program_data_size = load_program(
             task=task, memory=memory, program_header=ids.program_header,
             builtins_offset=ids.ProgramHeader.builtin_list)
-        segments.finalize(program_data_base.segment_index, program_data_size)
+        segments.finalize(program_data_base.segment_index, program_data_size+1)
     %}
 
     // Verify that the bootloader version is compatible with the bootloader.
@@ -133,14 +127,8 @@ func execute_task{builtin_ptrs: BuiltinData*, self_range_check_ptr}(
         output=output_ptr + 2,
         pedersen=cast(pedersen_ptr, felt),
         range_check=input_builtin_ptrs.range_check,
-        ecdsa=input_builtin_ptrs.ecdsa,
         bitwise=input_builtin_ptrs.bitwise,
-        ec_op=input_builtin_ptrs.ec_op,
-        keccak=input_builtin_ptrs.keccak,
         poseidon=cast(poseidon_ptr, felt),
-        range_check96=input_builtin_ptrs.range_check96,
-        add_mod=input_builtin_ptrs.add_mod,
-        mul_mod=input_builtin_ptrs.mul_mod,
     );
 
     // Call select_input_builtins to get the relevant input builtin pointers for the task.
@@ -208,6 +196,7 @@ func execute_task{builtin_ptrs: BuiltinData*, self_range_check_ptr}(
     // Allocate a struct containing all builtin pointers just after the program returns.
     local return_builtin_ptrs: BuiltinData;
     %{
+        from starkware.cairo.bootloaders.simple_bootloader.recursive_with_poseidon.builtins import ALL_BUILTINS
         from starkware.cairo.bootloaders.simple_bootloader.utils import write_return_builtins
 
         # Fill the values of all builtin pointers after executing the task.
@@ -215,7 +204,7 @@ func execute_task{builtin_ptrs: BuiltinData*, self_range_check_ptr}(
         write_return_builtins(
             memory=memory, return_builtins_addr=ids.return_builtin_ptrs.address_,
             used_builtins=builtins, used_builtins_addr=ids.used_builtins_addr,
-            pre_execution_builtins_addr=ids.pre_execution_builtin_ptrs.address_, task=task)
+            pre_execution_builtins_addr=ids.pre_execution_builtin_ptrs.address_, task=task, all_builtins=ALL_BUILTINS)
 
         vm_enter_scope({'n_selected_builtins': n_builtins})
     %}
