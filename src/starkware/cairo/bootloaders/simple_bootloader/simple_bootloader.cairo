@@ -1,4 +1,4 @@
-%builtins output pedersen range_check ecdsa bitwise ec_op keccak poseidon range_check96 add_mod mul_mod
+%builtins output pedersen range_check ecdsa bitwise ec_op poseidon
 
 from starkware.cairo.bootloaders.simple_bootloader.run_simple_bootloader import (
     run_simple_bootloader,
@@ -13,11 +13,7 @@ func main{
     ecdsa_ptr,
     bitwise_ptr,
     ec_op_ptr,
-    keccak_ptr,
     poseidon_ptr: PoseidonBuiltin*,
-    range_check96_ptr,
-    add_mod_ptr,
-    mul_mod_ptr,
 }() {
     %{
         from starkware.cairo.bootloaders.simple_bootloader.objects import SimpleBootloaderInput
