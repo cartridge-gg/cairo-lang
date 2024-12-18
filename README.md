@@ -2,7 +2,9 @@
 Make sure you have proper python version `Python 3.9.18`
 #### 1. Create python virtual enviroment
 `python -m venv venv`
-#### 2. Install requiered libs
+#### 2. activate venv 
+`source venv/bin/activate` 
+#### 3. Install requiered libs
 `pip install -r scripts/requirements.txt`
 
 # Bootloader
