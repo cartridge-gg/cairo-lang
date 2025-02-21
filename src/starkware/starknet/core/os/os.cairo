@@ -319,9 +319,6 @@ func execute_blocks{
             use_kzg_da=use_kzg_da,
             full_output=full_output,
         ),
-        squashed_os_state_update=squashed_os_state_update,
-        initial_carried_outputs=initial_carried_outputs,
-        final_carried_outputs=final_carried_outputs,
     );
 
     return execute_blocks(
