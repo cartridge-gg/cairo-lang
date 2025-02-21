@@ -180,7 +180,6 @@ func main{
             initial_carried_outputs=initial_carried_outputs,
             final_carried_outputs=final_carried_outputs,
         ),
-        replace_keys_with_aliases=TRUE,
     );
 
     // Make sure that we report using at least 1 range check to guarantee that
