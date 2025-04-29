@@ -2,6 +2,17 @@ from starkware.cairo.common.dict import DictAccess
 from starkware.cairo.common.math import assert_nn_le
 from starkware.cairo.common.math_cmp import is_not_zero
 from starkware.starknet.core.os.state.commitment import StateEntry
+from starkware.cairo.common.alloc import alloc
+from starkware.cairo.common.serialize import serialize_word
+from starkware.starknet.core.os.state.helper import (
+    merkle_tree_hash,
+    is_sorted_recursively,
+    sort_array,
+    add_zeros
+)
+from starkware.cairo.common.log2_ceil import log2_ceil
+from starkware.cairo.common.pow import pow
+from starkware.cairo.common.cairo_builtins import PoseidonBuiltin
 
 // The on-chain data for contract state changes has the following format:
 //
@@ -71,17 +82,17 @@ struct FullStateUpdateEntry {
 
 // Outputs the entries that were changed in `update_ptr` into `state_updates_ptr`.
 // Returns the number of such entries.
-func serialize_da_changes{state_updates_ptr: felt*}(
+func serialize_da_changes{state_updates_ptr: felt*, filtered_slots: felt*, filtered_slots_len: felt}(
     update_ptr: DictAccess*, n_updates: felt, full_output: felt,
     ptr_to_storage_keys: felt*, array_len: felt
 ) -> felt {
+    alloc_locals;
     if (full_output == 0) {
         // Keep a pointer to the start of the array.
         let state_updates_start = state_updates_ptr;
         // Cast `state_updates_ptr` to `StateUpdateEntry*`.
         let state_updates = cast(state_updates_ptr, StateUpdateEntry*);
-
-        serialize_da_changes_inner{state_updates=state_updates}(
+        serialize_da_changes_inner{state_updates=state_updates, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
             update_ptr=update_ptr, n_updates=n_updates, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
         );
 
@@ -94,7 +105,7 @@ func serialize_da_changes{state_updates_ptr: felt*}(
         // Cast `state_updates_ptr` to `FullStateUpdateEntry*`.
         let state_updates_full = cast(state_updates_ptr, FullStateUpdateEntry*);
 
-        serialize_da_changes_inner_full{state_updates=state_updates_full}(
+        serialize_da_changes_inner_full{state_updates=state_updates_full, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
             update_ptr=update_ptr, n_updates=n_updates, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
         );
 
@@ -105,14 +116,14 @@ func serialize_da_changes{state_updates_ptr: felt*}(
 }
 
 // Helper function for `serialize_da_changes` for the case `full_output == 0`.
-func serialize_da_changes_inner{state_updates: StateUpdateEntry*}(
+func serialize_da_changes_inner{state_updates: StateUpdateEntry*, filtered_slots: felt*, filtered_slots_len: felt}(
     update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: felt*, array_len: felt
 ) {
     if (n_updates == 0) {
         return ();
     }
     // check if the key is in the array
-    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len);
+    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len,element_size=2);
     if (is_key_in_array_result == 0) {
         return serialize_da_changes_inner(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
     }
@@ -123,29 +134,35 @@ func serialize_da_changes_inner{state_updates: StateUpdateEntry*}(
         assert state_updates[0] = StateUpdateEntry(key=update_ptr.key, value=update_ptr.new_value);
         tempvar state_updates = &state_updates[1];
     }
-    return serialize_da_changes_inner(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
+    return serialize_da_changes_inner{state_updates=state_updates, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
 }
 
 // Helper function for `serialize_da_changes` for the case `full_output == 1`.
-func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*}(
+func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*, filtered_slots: felt*, filtered_slots_len: felt}(
     update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: felt*, array_len: felt
 ) {
     if (n_updates == 0) {
         return ();
     }
     // check if the key is in the array
-    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len);
+    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len,element_size=2);
     if (is_key_in_array_result == 0) {
         return serialize_da_changes_inner_full(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
     }
 
     if (update_ptr.prev_value == update_ptr.new_value) {
         tempvar state_updates = state_updates;
+        tempvar filtered_slots = filtered_slots;
+        tempvar filtered_slots_len = filtered_slots_len;
     } else {
         assert state_updates[0] = FullStateUpdateEntry(
             key=update_ptr.key, prev_value=update_ptr.prev_value, new_value=update_ptr.new_value
         );
+        assert filtered_slots[filtered_slots_len] = update_ptr.key;
+
         tempvar state_updates = &state_updates[1];
+        tempvar filtered_slots = filtered_slots;
+        tempvar filtered_slots_len = filtered_slots_len + 1;
     }
     return serialize_da_changes_inner_full(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
 }
@@ -155,19 +172,23 @@ func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*}(
 // See documentation in the beginning of the file for more information.
 //
 // Assumption: The dictionary `contract_state_changes_start` is squashed.
-func output_contract_state{range_check_ptr, state_updates_ptr: felt*}(
+func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_ptr: PoseidonBuiltin*}(
     contract_state_changes_start: DictAccess*, n_contract_state_changes: felt, full_output: felt,
     ptr_to_storage_keys: felt*, array_len: felt, contract_address_to_shard: felt
 ) {
     alloc_locals;
 
     // Make room for number of modified contracts.
-    let output_n_modified_contracts = [state_updates_ptr];
-    let state_updates_ptr = state_updates_ptr + 1;
+    let merkle_tree_root = [state_updates_ptr];
+    let output_n_modified_contracts = [state_updates_ptr+1];
+    let state_updates_ptr = state_updates_ptr + 2;
     let n_modified_contracts = 0;
 
+    let filtered_slots: felt* = alloc();
+    let filtered_slots_len = 0;
+    
     with n_modified_contracts {
-        output_contract_state_inner(
+        output_contract_state_inner{state_updates_ptr=state_updates_ptr, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
             n_contract_state_changes=n_contract_state_changes,
             state_changes=contract_state_changes_start,
             full_output=full_output,
@@ -179,13 +200,41 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*}(
     // Write number of modified contracts.
     assert output_n_modified_contracts = n_modified_contracts;
 
+    local sorted_array:felt*;
+    let (is_sorted) = is_sorted_recursively(filtered_slots, filtered_slots_len,index=0);
+    if (is_sorted == 0) {
+        let temp = sort_array(array=filtered_slots, array_len=filtered_slots_len);
+        sorted_array = temp;
+        //         
+        tempvar range_check_ptr = range_check_ptr;
+    }else{
+        sorted_array = filtered_slots;
+        tempvar range_check_ptr = range_check_ptr;
+    }
+    tempvar range_check_ptr = range_check_ptr;
+
+    let result: felt* = alloc();
+    let result_len = 0;
+    add_crdt_type{result=result,result_len=result_len}(input=ptr_to_storage_keys, input_len=array_len, filtered_slots=sorted_array, filtered_slots_len=filtered_slots_len);
+    let power_of_2 = log2_ceil(result_len);
+    let (new_array_len) = pow(2, power_of_2);
+    let zeros_to_add = new_array_len - result_len;
+    let added_zeros = 0;
+    let array_end_ptr = &result[result_len];
+    add_zeros{array=array_end_ptr, added_zeros=added_zeros}(zeros_to_add=zeros_to_add);
+    assert added_zeros = zeros_to_add;
+
+    let (tmp_merkle_tree_root) = merkle_tree_hash(array=result, array_len=new_array_len);
+    assert merkle_tree_root = tmp_merkle_tree_root;
+
+
     return ();
 }
 
 // Helper function for `output_contract_state()`.
 //
 // Increases `n_modified_contracts` by the number of contracts with state changes.
-func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_modified_contracts}(
+func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_modified_contracts:felt, filtered_slots: felt*, filtered_slots_len: felt}(
     n_contract_state_changes: felt, state_changes: DictAccess*, full_output: felt, 
     contract_address_to_shard: felt, ptr_to_storage_keys: felt*, array_len: felt
 ) {
@@ -240,7 +289,7 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
     }
 
     let storage_diff: felt* = contract_header + storage_diff_offset;
-    let n_actual_updates = serialize_da_changes{state_updates_ptr=storage_diff}(
+    let n_actual_updates = serialize_da_changes{state_updates_ptr=storage_diff, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
         update_ptr=storage_dict_start, n_updates=n_updates, full_output=full_output, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
     );
 
@@ -311,31 +360,7 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
     );
 }
 
-// Serializes changes in the contract class tree into 'state_updates_ptr'.
-func output_contract_class_da_changes{state_updates_ptr: felt*}(
-    update_ptr: DictAccess*, n_updates: felt, full_output: felt, 
-    ptr_to_storage_keys: felt*, array_len: felt
-) {
-    alloc_locals;
-
-    // Allocate space for the number of changes.
-    let n_diffs_output_placeholder = state_updates_ptr[0];
-    let state_updates_ptr = &state_updates_ptr[1];
-
-    // Write the updates.
-    with state_updates_ptr {
-        let n_actual_updates = serialize_da_changes(
-            update_ptr=update_ptr, n_updates=n_updates, full_output=full_output, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
-        );
-    }
-
-    // Write the number of updates.
-    assert n_diffs_output_placeholder = n_actual_updates;
-
-    return ();
-}
-
-func is_key_in_array(key: felt, array: felt*, array_len: felt) -> felt {
+func is_key_in_array(key: felt, array: felt*, array_len: felt,element_size: felt) -> felt {
     if (array_len == 0) {
         return 0;  
     }
@@ -344,5 +369,25 @@ func is_key_in_array(key: felt, array: felt*, array_len: felt) -> felt {
         return 1;
     }
 
-    return is_key_in_array(key=key, array=&array[1], array_len=array_len - 1);
+    return is_key_in_array(key=key, array=&array[element_size], array_len=array_len - 1,element_size=element_size);
+}
+
+func add_crdt_type{result: felt*,result_len:felt}(input: felt*, input_len: felt, filtered_slots: felt*, filtered_slots_len: felt) {
+    if (input_len == 0 ){
+        return ();
+    }
+    if (filtered_slots_len == 0){
+        return ();
+    }
+
+    let exists = is_key_in_array(key=input[0], array=filtered_slots, array_len=filtered_slots_len,element_size=1);
+
+    if (exists == 0) {
+        return add_crdt_type(input=&input[2], input_len=input_len - 1, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len);
+    }
+    assert result[result_len*2] = input[0];
+    assert result[result_len*2+1] = input[1];
+    let result_len = result_len + 1;
+    
+    return add_crdt_type(input=&input[2], input_len=input_len - 1, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len);
 }

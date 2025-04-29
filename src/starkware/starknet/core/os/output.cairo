@@ -11,7 +11,7 @@ from starkware.starknet.core.os.data_availability.commitment import (
 from starkware.starknet.core.os.data_availability.compression import compress
 from starkware.starknet.core.os.state.commitment import CommitmentUpdate
 from starkware.starknet.core.os.state.output import (
-    output_contract_class_da_changes,
+    // output_contract_class_da_changes,
     output_contract_state,
 )
 from starkware.starknet.core.os.state.state import SquashedOsStateUpdate
@@ -108,14 +108,14 @@ func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output
             contract_address_to_shard=contract_address_to_shard,
         );
 
-        // Output the contract class diff.
-        output_contract_class_da_changes(
-            update_ptr=squashed_os_state_update.contract_class_changes,
-            n_updates=squashed_os_state_update.n_class_updates,
-            full_output=full_output,
-            ptr_to_storage_keys=slots,
-            array_len=slots_len,
-        );
+        // // Output the contract class diff.
+        // output_contract_class_da_changes(
+        //     update_ptr=squashed_os_state_update.contract_class_changes,
+        //     n_updates=squashed_os_state_update.n_class_updates,
+        //     full_output=full_output,
+        //     ptr_to_storage_keys=slots,
+        //     array_len=slots_len,
+        // );
     }
 
     serialize_output_header(os_output_header=os_output.header);
