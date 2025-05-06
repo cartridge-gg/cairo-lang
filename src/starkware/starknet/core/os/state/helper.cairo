@@ -18,19 +18,19 @@ func add_zeros{array: felt*, added_zeros: felt}(zeros_to_add: felt) {
 
 
 // Function to hash the array to get the merkle root
-func merkle_tree_hash{poseidon_ptr: PoseidonBuiltin*}(array: felt*, array_len: felt) -> (
+func merkle_tree_hash{poseidon_ptr: PoseidonBuiltin*}(array: felt*, array_len: felt,element_size: felt) -> (
     res: felt
 ) {
     alloc_locals;
     if (array_len == 1) {
-        
-        return poseidon_hash_many(1, array);
+        return poseidon_hash_many(element_size, array);
     }
 
-    let (left) = merkle_tree_hash(array=array, array_len=array_len / 2);
+    let new_array_len = (array_len / 2);
+    let (left) = merkle_tree_hash(array=array, array_len=new_array_len,element_size=element_size);
     local left = left;
 
-    let (right) = merkle_tree_hash(array=&array[array_len / 2], array_len=array_len / 2);
+    let (right) = merkle_tree_hash(array=&array[new_array_len*element_size], array_len=new_array_len,element_size=element_size);
     local right = right;
 
     let (new_array) = alloc();

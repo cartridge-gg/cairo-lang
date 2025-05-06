@@ -204,8 +204,7 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_p
     let (is_sorted) = is_sorted_recursively(filtered_slots, filtered_slots_len,index=0);
     if (is_sorted == 0) {
         let temp = sort_array(array=filtered_slots, array_len=filtered_slots_len);
-        sorted_array = temp;
-        //         
+        sorted_array = temp;       
         tempvar range_check_ptr = range_check_ptr;
     }else{
         sorted_array = filtered_slots;
@@ -215,6 +214,7 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_p
 
     let result: felt* = alloc();
     let result_len = 0;
+
     add_crdt_type{result=result,result_len=result_len}(input=ptr_to_storage_keys, input_len=array_len, filtered_slots=sorted_array, filtered_slots_len=filtered_slots_len);
     let power_of_2 = log2_ceil(result_len);
     let (new_array_len) = pow(2, power_of_2);
@@ -224,7 +224,7 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_p
     add_zeros{array=array_end_ptr, added_zeros=added_zeros}(zeros_to_add=zeros_to_add);
     assert added_zeros = zeros_to_add;
 
-    let (tmp_merkle_tree_root) = merkle_tree_hash(array=result, array_len=new_array_len);
+    let (tmp_merkle_tree_root) = merkle_tree_hash(array=result, array_len=new_array_len,element_size=2);
     assert merkle_tree_root = tmp_merkle_tree_root;
 
 
