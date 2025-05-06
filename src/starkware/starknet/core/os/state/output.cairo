@@ -200,11 +200,10 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_p
     // Write number of modified contracts.
     assert output_n_modified_contracts = n_modified_contracts;
 
-    if (output_n_modified_contracts == 0) {
+    if (filtered_slots_len == 0) {
         assert merkle_tree_root = 0;
         return ();
     }
-
     local sorted_array:felt*;
     let (is_sorted) = is_sorted_recursively(filtered_slots, filtered_slots_len,index=0);
     if (is_sorted == 0) {
