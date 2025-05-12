@@ -75,46 +75,12 @@ func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output
     os_output: OsOutput*
 ) {
     alloc_locals;
-    // local contract_address_to_shard;
-    // %{ids.contract_address_to_shard = os_input.contract_address_to_shard%}
 
-    // let (slots: felt*) = alloc();
-    // local slots_len;
-    // %{ids.slots = os_input.slots;ids.slots_len = len(ids.slots)%}
-
-    local crdt: Crdt;
-    crdt.address = 0x05dbbe27fcb035a733742b9b395574bc847e5ef152e3040cd3457fa3c78a1813;
-    crdt.slot_len = 2;
-    let slots: Slot* = alloc();
-
-    local slot1: Slot;
-    slot1.key = 0x8f57e25f13c943884ea296669809204f596a3593dff33ed8b9f568ba3ef4fd;
-    slot1.crdt_type = 0x1;
-    assert slots[1] = slot1;
-
-    local slot2: Slot;
-    slot2.key = 0x54910cf63406986c37df89a0309897200676f291661309d4602ca56cf7006;
-    slot2.crdt_type = 0x2;
-    assert slots[0] = slot2;
-
-
-    crdt.slots = slots;
-
-    local crdt2: Crdt;
-    crdt2.address = 0x2e7442625bab778683501c0eadbc1ea17b3535da040a12ac7d281066e915eea;
-    crdt2.slot_len = 1;
-    let slots2: Slot* = alloc();
-    local slot1_2: Slot;
-    slot1_2.key = 0x67840c21d0d3cba9ed504d8867dffe868f3d43708cfc0d7ed7980b511850070;
-    slot1_2.crdt_type = 0x1;
-    assert slots2[0] = slot1_2;
-    crdt2.slots = slots2;
-    
     let crdts: Crdt* = alloc();
+    local crdts_len;
+    %{ids.slots = os_input.slots;ids.slots_len = len(ids.slots)%}
 
-    assert crdts[0] = crdt;
-    assert crdts[1] = crdt2;
-    let crdts_len = 2;
+
 
     local use_kzg_da = os_output.header.use_kzg_da;
     local full_output = os_output.header.full_output;
