@@ -15,6 +15,7 @@ from starkware.starknet.core.os.state.output import (
     output_contract_state,
 )
 from starkware.starknet.core.os.state.state import SquashedOsStateUpdate
+from starkware.starknet.core.os.state.output import (Crdt, Slot)
 from starkware.cairo.common.alloc import alloc
 
 // Represents the output of the OS.
@@ -69,16 +70,51 @@ struct OsCarriedOutputs {
     messages_to_l2: MessageToL2Header*,
 }
 
+
 func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output_ptr: felt*}(
     os_output: OsOutput*
 ) {
     alloc_locals;
-    local contract_address_to_shard;
-    %{ids.contract_address_to_shard = os_input.contract_address_to_shard%}
+    // local contract_address_to_shard;
+    // %{ids.contract_address_to_shard = os_input.contract_address_to_shard%}
 
-    let (slots: felt*) = alloc();
-    local slots_len;
-    %{ids.slots = os_input.slots;ids.slots_len = len(ids.slots)%}
+    // let (slots: felt*) = alloc();
+    // local slots_len;
+    // %{ids.slots = os_input.slots;ids.slots_len = len(ids.slots)%}
+
+    local crdt: Crdt;
+    crdt.address = 0x05dbbe27fcb035a733742b9b395574bc847e5ef152e3040cd3457fa3c78a1813;
+    crdt.slot_len = 2;
+    let slots: Slot* = alloc();
+
+    local slot1: Slot;
+    slot1.key = 0x8f57e25f13c943884ea296669809204f596a3593dff33ed8b9f568ba3ef4fd;
+    slot1.crdt_type = 0x1;
+    assert slots[1] = slot1;
+
+    local slot2: Slot;
+    slot2.key = 0x54910cf63406986c37df89a0309897200676f291661309d4602ca56cf7006;
+    slot2.crdt_type = 0x2;
+    assert slots[0] = slot2;
+
+
+    crdt.slots = slots;
+
+    local crdt2: Crdt;
+    crdt2.address = 0x2e7442625bab778683501c0eadbc1ea17b3535da040a12ac7d281066e915eea;
+    crdt2.slot_len = 1;
+    let slots2: Slot* = alloc();
+    local slot1_2: Slot;
+    slot1_2.key = 0x67840c21d0d3cba9ed504d8867dffe868f3d43708cfc0d7ed7980b511850070;
+    slot1_2.crdt_type = 0x1;
+    assert slots2[0] = slot1_2;
+    crdt2.slots = slots2;
+    
+    let crdts: Crdt* = alloc();
+
+    assert crdts[0] = crdt;
+    assert crdts[1] = crdt2;
+    let crdts_len = 2;
 
     local use_kzg_da = os_output.header.use_kzg_da;
     local full_output = os_output.header.full_output;
@@ -103,19 +139,9 @@ func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output
             contract_state_changes_start=squashed_os_state_update.contract_state_changes,
             n_contract_state_changes=squashed_os_state_update.n_contract_state_changes,
             full_output=full_output,
-            ptr_to_storage_keys=slots,
-            array_len=slots_len,
-            contract_address_to_shard=contract_address_to_shard,
+            crdts=crdts,
+            crdts_len=crdts_len,
         );
-
-        // // Output the contract class diff.
-        // output_contract_class_da_changes(
-        //     update_ptr=squashed_os_state_update.contract_class_changes,
-        //     n_updates=squashed_os_state_update.n_class_updates,
-        //     full_output=full_output,
-        //     ptr_to_storage_keys=slots,
-        //     array_len=slots_len,
-        // );
     }
 
     serialize_output_header(os_output_header=os_output.header);
@@ -163,14 +189,6 @@ func serialize_output_header{output_ptr: felt*}(os_output_header: OsOutputHeader
     // Serialize program output.
 
     // Serialize roots.In sharding execution, the roots are not included in the output.
-    // serialize_word(os_output_header.state_update_output.initial_root);
-    // serialize_word(os_output_header.state_update_output.final_root);
-    // serialize_word(os_output_header.prev_block_number);
-    // serialize_word(os_output_header.new_block_number);
-    // serialize_word(os_output_header.prev_block_hash);
-    // serialize_word(os_output_header.new_block_hash);
-    // serialize_word(os_output_header.os_program_hash);
-    // serialize_word(os_output_header.starknet_os_config_hash);
     serialize_word(os_output_header.use_kzg_da);
     serialize_word(os_output_header.full_output);
 

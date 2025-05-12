@@ -4,16 +4,13 @@ from starkware.cairo.common.math_cmp import is_not_zero
 from starkware.starknet.core.os.state.commitment import StateEntry
 from starkware.cairo.common.alloc import alloc
 from starkware.cairo.common.serialize import serialize_word
-from starkware.starknet.core.os.state.helper import (
-    merkle_tree_hash,
-    is_sorted_recursively,
-    sort_array,
-    add_zeros
-)
 from starkware.cairo.common.log2_ceil import log2_ceil
 from starkware.cairo.common.pow import pow
 from starkware.cairo.common.cairo_builtins import PoseidonBuiltin
+from starkware.cairo.common.math_cmp import is_le_felt
+from starkware.cairo.common.builtin_poseidon.poseidon import poseidon_hash_many
 
+// from starkware.starknet.core.os.output import Crdt
 // The on-chain data for contract state changes has the following format:
 //
 // * The number of affected contracts.
@@ -80,50 +77,78 @@ struct FullStateUpdateEntry {
     new_value: felt,
 }
 
+struct Crdt {
+    address: felt,
+    slot_len: felt,
+    slots: Slot*,
+}
+struct Slot{ 
+    key: felt,
+    crdt_type: felt,
+}
 // Outputs the entries that were changed in `update_ptr` into `state_updates_ptr`.
 // Returns the number of such entries.
-func serialize_da_changes{state_updates_ptr: felt*, filtered_slots: felt*, filtered_slots_len: felt}(
+func serialize_da_changes{state_updates_ptr: felt*, range_check_ptr, poseidon_ptr: PoseidonBuiltin*}(
     update_ptr: DictAccess*, n_updates: felt, full_output: felt,
-    ptr_to_storage_keys: felt*, array_len: felt
-) -> felt {
+    ptr_to_storage_keys: Slot*, array_len: felt
+) -> (felt, felt) {
     alloc_locals;
     if (full_output == 0) {
         // Keep a pointer to the start of the array.
         let state_updates_start = state_updates_ptr;
         // Cast `state_updates_ptr` to `StateUpdateEntry*`.
         let state_updates = cast(state_updates_ptr, StateUpdateEntry*);
-        serialize_da_changes_inner{state_updates=state_updates, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
+        
+        serialize_da_changes_inner{state_updates=state_updates}(
             update_ptr=update_ptr, n_updates=n_updates, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
         );
-
         // Cast back to `felt*`.
         let state_updates_ptr = cast(state_updates, felt*);
-        return (state_updates_ptr - state_updates_start) / StateUpdateEntry.SIZE;
+        return ((state_updates_ptr - state_updates_start) / StateUpdateEntry.SIZE,1);
     } else {
         // Keep a pointer to the start of the array.
         let state_updates_start = state_updates_ptr;
         // Cast `state_updates_ptr` to `FullStateUpdateEntry*`.
         let state_updates_full = cast(state_updates_ptr, FullStateUpdateEntry*);
 
-        serialize_da_changes_inner_full{state_updates=state_updates_full, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
+        serialize_da_changes_inner_full{state_updates=state_updates_full}(
             update_ptr=update_ptr, n_updates=n_updates, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
         );
 
         // Cast back to `felt*`.
         let state_updates_ptr = cast(state_updates_full, felt*);
-        return (state_updates_ptr - state_updates_start) / FullStateUpdateEntry.SIZE;
+        if (array_len == 0) {
+            return ((state_updates_ptr - state_updates_start) / FullStateUpdateEntry.SIZE,0);
+        }
+        tempvar range_check_ptr = range_check_ptr;
+        let (is_sorted) = is_sorted_recursively(array=ptr_to_storage_keys, array_len=array_len,index=0);
+        if (is_sorted == 0 ){
+            return ((state_updates_ptr - state_updates_start) / FullStateUpdateEntry.SIZE,0);
+        }
+        let tmp = log2_ceil(array_len);
+        let (new_len) = pow(2,tmp);
+        let zeros_to_add = new_len - array_len;
+        let added_zeros = 0;
+        let array_end_ptr = &ptr_to_storage_keys[array_len];
+        add_zeros{array=array_end_ptr, added_zeros=zeros_to_add}(zeros_to_add=zeros_to_add);
+        assert added_zeros = zeros_to_add;
+        let (merkle_root) = merkle_tree_hash(array=ptr_to_storage_keys, array_len=new_len);
+        return ((state_updates_ptr - state_updates_start) / FullStateUpdateEntry.SIZE,merkle_root);
     }
 }
 
 // Helper function for `serialize_da_changes` for the case `full_output == 0`.
-func serialize_da_changes_inner{state_updates: StateUpdateEntry*, filtered_slots: felt*, filtered_slots_len: felt}(
-    update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: felt*, array_len: felt
+func serialize_da_changes_inner{state_updates: StateUpdateEntry*}(
+    update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: Slot*, array_len: felt
 ) {
     if (n_updates == 0) {
         return ();
     }
+    if (array_len == 0) {
+        return ();
+    }
     // check if the key is in the array
-    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len,element_size=2);
+    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len);
     if (is_key_in_array_result == 0) {
         return serialize_da_changes_inner(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
     }
@@ -134,35 +159,34 @@ func serialize_da_changes_inner{state_updates: StateUpdateEntry*, filtered_slots
         assert state_updates[0] = StateUpdateEntry(key=update_ptr.key, value=update_ptr.new_value);
         tempvar state_updates = &state_updates[1];
     }
-    return serialize_da_changes_inner{state_updates=state_updates, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
+    return serialize_da_changes_inner{state_updates=state_updates}(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
 }
 
 // Helper function for `serialize_da_changes` for the case `full_output == 1`.
-func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*, filtered_slots: felt*, filtered_slots_len: felt}(
-    update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: felt*, array_len: felt
+func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*}(
+    update_ptr: DictAccess*, n_updates: felt, ptr_to_storage_keys: Slot*, array_len: felt
 ) {
     if (n_updates == 0) {
         return ();
     }
     // check if the key is in the array
-    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len,element_size=2);
+    if (array_len == 0) {
+        return ();
+    }
+
+    let is_key_in_array_result = is_key_in_array(key=update_ptr.key, array=ptr_to_storage_keys, array_len=array_len);
     if (is_key_in_array_result == 0) {
         return serialize_da_changes_inner_full(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
     }
 
     if (update_ptr.prev_value == update_ptr.new_value) {
         tempvar state_updates = state_updates;
-        tempvar filtered_slots = filtered_slots;
-        tempvar filtered_slots_len = filtered_slots_len;
     } else {
         assert state_updates[0] = FullStateUpdateEntry(
             key=update_ptr.key, prev_value=update_ptr.prev_value, new_value=update_ptr.new_value
         );
-        assert filtered_slots[filtered_slots_len] = update_ptr.key;
 
         tempvar state_updates = &state_updates[1];
-        tempvar filtered_slots = filtered_slots;
-        tempvar filtered_slots_len = filtered_slots_len + 1;
     }
     return serialize_da_changes_inner_full(update_ptr=&update_ptr[1], n_updates=n_updates - 1, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len);
 }
@@ -174,63 +198,26 @@ func serialize_da_changes_inner_full{state_updates: FullStateUpdateEntry*, filte
 // Assumption: The dictionary `contract_state_changes_start` is squashed.
 func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_ptr: PoseidonBuiltin*}(
     contract_state_changes_start: DictAccess*, n_contract_state_changes: felt, full_output: felt,
-    ptr_to_storage_keys: felt*, array_len: felt, contract_address_to_shard: felt
+    crdts: Crdt*,crdts_len: felt
 ) {
     alloc_locals;
 
     // Make room for number of modified contracts.
-    let merkle_tree_root = [state_updates_ptr];
-    let output_n_modified_contracts = [state_updates_ptr+1];
-    let state_updates_ptr = state_updates_ptr + 2;
+    let output_n_modified_contracts = [state_updates_ptr];
+    let state_updates_ptr = state_updates_ptr + 1;
     let n_modified_contracts = 0;
-
-    let filtered_slots: felt* = alloc();
-    let filtered_slots_len = 0;
     
     with n_modified_contracts {
-        output_contract_state_inner{state_updates_ptr=state_updates_ptr, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
+        output_contract_state_inner{state_updates_ptr=state_updates_ptr}(
             n_contract_state_changes=n_contract_state_changes,
             state_changes=contract_state_changes_start,
             full_output=full_output,
-            contract_address_to_shard=contract_address_to_shard,
-            ptr_to_storage_keys=ptr_to_storage_keys,
-            array_len=array_len,
+            crdts=crdts,
+            crdts_len=crdts_len,
         );
     }
     // Write number of modified contracts.
     assert output_n_modified_contracts = n_modified_contracts;
-
-    if (filtered_slots_len == 0) {
-        assert merkle_tree_root = 0;
-        return ();
-    }
-    local sorted_array:felt*;
-    let (is_sorted) = is_sorted_recursively(filtered_slots, filtered_slots_len,index=0);
-    if (is_sorted == 0) {
-        let temp = sort_array(array=filtered_slots, array_len=filtered_slots_len);
-        sorted_array = temp;       
-        tempvar range_check_ptr = range_check_ptr;
-    }else{
-        sorted_array = filtered_slots;
-        tempvar range_check_ptr = range_check_ptr;
-    }
-    tempvar range_check_ptr = range_check_ptr;
-
-    let result: felt* = alloc();
-    let result_len = 0;
-
-    add_crdt_type{result=result,result_len=result_len}(input=ptr_to_storage_keys, input_len=array_len, filtered_slots=sorted_array, filtered_slots_len=filtered_slots_len);
-    let power_of_2 = log2_ceil(result_len);
-    let (new_array_len) = pow(2, power_of_2);
-    let zeros_to_add = new_array_len - result_len;
-    let added_zeros = 0;
-    let array_end_ptr = &result[result_len];
-    add_zeros{array=array_end_ptr, added_zeros=added_zeros}(zeros_to_add=zeros_to_add);
-    assert added_zeros = zeros_to_add;
-
-    let (tmp_merkle_tree_root) = merkle_tree_hash(array=result, array_len=new_array_len,element_size=2);
-    assert merkle_tree_root = tmp_merkle_tree_root;
-
 
     return ();
 }
@@ -238,23 +225,24 @@ func output_contract_state{range_check_ptr, state_updates_ptr: felt*, poseidon_p
 // Helper function for `output_contract_state()`.
 //
 // Increases `n_modified_contracts` by the number of contracts with state changes.
-func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_modified_contracts:felt, filtered_slots: felt*, filtered_slots_len: felt}(
+func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_modified_contracts:felt, poseidon_ptr: PoseidonBuiltin*}(
     n_contract_state_changes: felt, state_changes: DictAccess*, full_output: felt, 
-    contract_address_to_shard: felt, ptr_to_storage_keys: felt*, array_len: felt
+    crdts: Crdt*,crdts_len: felt
 ) {
     if (n_contract_state_changes == 0) {
         return ();
     }
     alloc_locals;
-
-    if (state_changes.key != contract_address_to_shard) {
+    
+    let is_key_in_crdts_result = is_key_in_crdts(key=state_changes.key, crdts=crdts, crdt_len=crdts_len);
+    let index = crdts_len - is_key_in_crdts_result;
+    if (is_key_in_crdts_result == 0) {
         return output_contract_state_inner(
             n_contract_state_changes=n_contract_state_changes - 1,
             state_changes=&state_changes[1],
             full_output=full_output,
-            contract_address_to_shard=contract_address_to_shard,
-            ptr_to_storage_keys=ptr_to_storage_keys,
-            array_len=array_len,
+            crdts=crdts,
+            crdts_len=crdts_len,
         );
     }
 
@@ -274,7 +262,7 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
 
     // Class hash.
     local was_class_updated = is_not_zero(prev_state.class_hash - new_state.class_hash);
-    const BASE_HEADER_SIZE = 2;
+    const BASE_HEADER_SIZE = 3;
     if (full_output != 0) {
         // Write the previous and new class hash.
         assert contract_header[BASE_HEADER_SIZE] = prev_state.class_hash;
@@ -293,10 +281,11 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
     }
 
     let storage_diff: felt* = contract_header + storage_diff_offset;
-    let n_actual_updates = serialize_da_changes{state_updates_ptr=storage_diff, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len}(
-        update_ptr=storage_dict_start, n_updates=n_updates, full_output=full_output, ptr_to_storage_keys=ptr_to_storage_keys, array_len=array_len
-    );
 
+    let (n_actual_updates, merkle_tree_hash) = serialize_da_changes{state_updates_ptr=storage_diff}(
+        update_ptr=storage_dict_start, n_updates=n_updates, full_output=full_output, ptr_to_storage_keys=crdts[index].slots, array_len=crdts[index].slot_len
+    );
+    
     if (full_output == 0 and n_actual_updates == 0 and new_state_nonce == prev_state_nonce and
         was_class_updated == 0) {
         // There are no updates for this contract.
@@ -304,15 +293,15 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
             n_contract_state_changes=n_contract_state_changes - 1,
             state_changes=&state_changes[1],
             full_output=full_output,
-            contract_address_to_shard=contract_address_to_shard,
-            ptr_to_storage_keys=ptr_to_storage_keys,
-            array_len=array_len,
+            crdts=crdts,
+            crdts_len=crdts_len,
         );
     }
 
     // Complete the header; Write contract address.
+    
     assert contract_header[0] = state_changes.key;
-
+    assert contract_header[1] = merkle_tree_hash;
     // Write the second word of the header.
     // Handle the nonce.
     assert_nn_le(new_state_nonce, NONCE_BOUND - 1);
@@ -349,7 +338,7 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
     // Write 'was class updated' flag.
     let value = value * 2 + was_class_updated;
 
-    assert contract_header[1] = value;
+    assert contract_header[2] = value;
 
     let state_updates_ptr = cast(storage_diff, felt*);
     let n_modified_contracts = n_modified_contracts + 1;
@@ -358,40 +347,87 @@ func output_contract_state_inner{range_check_ptr, state_updates_ptr: felt*, n_mo
         n_contract_state_changes=n_contract_state_changes - 1,
         state_changes=&state_changes[1],
         full_output=full_output,
-        contract_address_to_shard=contract_address_to_shard,
-        ptr_to_storage_keys=ptr_to_storage_keys,
-        array_len=array_len,
+        crdts=crdts,
+        crdts_len=crdts_len,
     );
 }
 
-func is_key_in_array(key: felt, array: felt*, array_len: felt,element_size: felt) -> felt {
+func is_key_in_array(key: felt, array: Slot*, array_len: felt) -> felt {
     if (array_len == 0) {
         return 0;  
     }
 
-    if (key == array[0]) {
+    if (key == array[0].key) {
         return 1;
     }
 
-    return is_key_in_array(key=key, array=&array[element_size], array_len=array_len - 1,element_size=element_size);
+    return is_key_in_array(key=key, array=&array[1], array_len=array_len - 1);
 }
 
-func add_crdt_type{result: felt*,result_len:felt}(input: felt*, input_len: felt, filtered_slots: felt*, filtered_slots_len: felt) {
-    if (input_len == 0 ){
-        return ();
+func is_key_in_crdts(key: felt, crdts: Crdt*, crdt_len: felt) -> felt {
+    if (crdt_len == 0) {
+        return 0;
     }
-    if (filtered_slots_len == 0){
+    if (key == crdts[0].address) {
+        return crdt_len;
+    }
+    return is_key_in_crdts(key=key, crdts=&crdts[1], crdt_len=crdt_len - 1);
+}
+
+// Function to add zeros to the array to make it a power of 2
+func add_zeros{array: Slot*, added_zeros: felt}(zeros_to_add: felt) {
+    if (zeros_to_add == 0) {
         return ();
     }
 
-    let exists = is_key_in_array(key=input[0], array=filtered_slots, array_len=filtered_slots_len,element_size=1);
+    assert array[added_zeros].key = 0;
+    assert array[added_zeros].crdt_type = 0;
+    let next_added_zeros = added_zeros;
+    return add_zeros{array=array, added_zeros=next_added_zeros}(zeros_to_add=zeros_to_add - 1);
+}
 
-    if (exists == 0) {
-        return add_crdt_type(input=&input[2], input_len=input_len - 1, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len);
+
+// Function to check if an array is sorted in ascending order recursively
+func is_sorted_recursively{range_check_ptr}(array: Slot*, array_len: felt, index: felt) -> (is_sorted: felt) {
+    // Base case: if we have reached the second last element
+    if (index == array_len - 1) {
+        return (is_sorted=1);
     }
-    assert result[result_len*2] = input[0];
-    assert result[result_len*2+1] = input[1];
-    let result_len = result_len + 1;
-    
-    return add_crdt_type(input=&input[2], input_len=input_len - 1, filtered_slots=filtered_slots, filtered_slots_len=filtered_slots_len);
+    let x = is_le_felt(array[index].key, array[index + 1].key);
+
+    if (x == 0) {
+        return (is_sorted=0);
+    }
+
+    // Recurse for the rest of the array
+    return is_sorted_recursively(array=array, array_len=array_len, index=index + 1);
+}
+
+
+// Function to hash the array to get the merkle root
+func merkle_tree_hash{poseidon_ptr: PoseidonBuiltin*}(array: Slot*, array_len: felt) -> (
+    res: felt
+) {
+    alloc_locals;
+    if (array_len == 1) {
+       let (new_array) = alloc();
+        assert new_array[0] = array[0].key;
+        assert new_array[1] = array[0].crdt_type;
+        return poseidon_hash_many(2, new_array);
+    }
+
+    let new_array_len = (array_len / 2);
+    let (left) = merkle_tree_hash(array=array, array_len=new_array_len);
+    local left = left;
+
+    let (right) = merkle_tree_hash(array=&array[new_array_len], array_len=new_array_len);
+    local right = right;
+
+    let (new_array) = alloc();
+    new_array[0] = left;
+    new_array[1] = right;
+
+    let (res) = poseidon_hash_many(2, new_array);
+    local res = res;
+    return (res=res);
 }
