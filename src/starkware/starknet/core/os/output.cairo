@@ -11,10 +11,12 @@ from starkware.starknet.core.os.data_availability.commitment import (
 from starkware.starknet.core.os.data_availability.compression import compress
 from starkware.starknet.core.os.state.commitment import CommitmentUpdate
 from starkware.starknet.core.os.state.output import (
-    output_contract_class_da_changes,
+    // output_contract_class_da_changes,
     output_contract_state,
 )
 from starkware.starknet.core.os.state.state import SquashedOsStateUpdate
+from starkware.starknet.core.os.state.output import (Crdt, Slot)
+from starkware.cairo.common.alloc import alloc
 
 // Represents the output of the OS.
 struct OsOutput {
@@ -68,10 +70,17 @@ struct OsCarriedOutputs {
     messages_to_l2: MessageToL2Header*,
 }
 
+
 func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output_ptr: felt*}(
     os_output: OsOutput*
 ) {
     alloc_locals;
+
+    let crdts: Crdt* = alloc();
+    local crdts_len;
+    %{ids.slots = os_input.slots;ids.slots_len = len(ids.slots)%}
+
+
 
     local use_kzg_da = os_output.header.use_kzg_da;
     local full_output = os_output.header.full_output;
@@ -96,13 +105,8 @@ func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output
             contract_state_changes_start=squashed_os_state_update.contract_state_changes,
             n_contract_state_changes=squashed_os_state_update.n_contract_state_changes,
             full_output=full_output,
-        );
-
-        // Output the contract class diff.
-        output_contract_class_da_changes(
-            update_ptr=squashed_os_state_update.contract_class_changes,
-            n_updates=squashed_os_state_update.n_class_updates,
-            full_output=full_output,
+            crdts=crdts,
+            crdts_len=crdts_len,
         );
     }
 
@@ -129,12 +133,7 @@ func serialize_os_output{range_check_ptr, poseidon_ptr: PoseidonBuiltin*, output
     }
     local range_check_ptr = range_check_ptr;
     local poseidon_ptr: PoseidonBuiltin* = poseidon_ptr;
-
-    serialize_messages(
-        initial_carried_outputs=os_output.initial_carried_outputs,
-        final_carried_outputs=os_output.final_carried_outputs,
-    );
-
+    tempvar output_ptr = output_ptr;
     if (use_kzg_da == 0) {
         serialize_data_availability(da_start=da_start, da_end=da_end);
     }
@@ -155,15 +154,7 @@ func os_carried_outputs_new(
 func serialize_output_header{output_ptr: felt*}(os_output_header: OsOutputHeader*) {
     // Serialize program output.
 
-    // Serialize roots.
-    serialize_word(os_output_header.state_update_output.initial_root);
-    serialize_word(os_output_header.state_update_output.final_root);
-    serialize_word(os_output_header.prev_block_number);
-    serialize_word(os_output_header.new_block_number);
-    serialize_word(os_output_header.prev_block_hash);
-    serialize_word(os_output_header.new_block_hash);
-    serialize_word(os_output_header.os_program_hash);
-    serialize_word(os_output_header.starknet_os_config_hash);
+    // Serialize roots.In sharding execution, the roots are not included in the output.
     serialize_word(os_output_header.use_kzg_da);
     serialize_word(os_output_header.full_output);
 
@@ -171,7 +162,7 @@ func serialize_output_header{output_ptr: felt*}(os_output_header: OsOutputHeader
 }
 
 // Serializes to output the L1<>L2 messages sent during the execution.
-func serialize_messages{output_ptr: felt*}(
+func _serialize_messages{output_ptr: felt*}(
     initial_carried_outputs: OsCarriedOutputs*, final_carried_outputs: OsCarriedOutputs*
 ) {
     let messages_to_l1_segment_size = (
